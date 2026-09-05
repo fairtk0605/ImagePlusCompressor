@@ -1,8 +1,3 @@
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.msgpack.jackson.dataformat.MessagePackFactory;
-import java.io.File;
-import java.io.IOException;
-
 import ij.*;
 import ij.plugin.*;
 
@@ -10,24 +5,32 @@ public class ZImpSample implements PlugIn {
     public void run(String arg) {
         ImagePlus imp = IJ.getImage();
 
-        ZstdImage zImp0 = new ZstdImage(imp);
-        ZQImage   zImp1 = new ZQImage(imp,64);
-        ZQBGImage zImp2 = new ZQBGImage(imp);
+        ZstdImage zImp0 = new ZstdImage(imp, new NoLossStrategy());
+        testIO(zImp0, "test_zimp0.zimp");
+        ZstdImage zImp1 = new ZstdImage(imp, new QuantizationStrategy(64));
+        testIO(zImp1, "test_zimp1.zimp");
 
-        saveAndreadAndShowZimp("F0", zImp0);
-        saveAndreadAndShowZimp("F1", zImp1);
-        saveAndreadAndShowZimp("F2", zImp2);
+        ZstdImage zImp2 = new ZstdImage(imp, new JpegStrategy(0.85f));
+        testIO(zImp2, "test_zimp2.zimp");
+
+        ZBGImage zImp00 = new ZBGImage(imp, new NoLossStrategy());
+        testIO(zImp00, "test_zimp00.zimp");
+
+        ZBGImage zImp01 = new ZBGImage(imp, new QuantizationStrategy(64));
+        testIO(zImp01, "test_zimp01.zimp");
+
+        ZBGImage zImp02 = new ZBGImage(imp, new JpegStrategy(0.85f));
+        testIO(zImp02, "test_zimp02.zimp");
+        
     }
 
-    public void saveAndreadAndShowZimp(String file,ZstdImage zimp){
-        ObjectMapper mapper = new ObjectMapper(new MessagePackFactory());
-        File f0 = new File(file + ".zimp");
-        try{mapper.writeValue(f0,zimp);}
-        catch (IOException e) { e.printStackTrace();}
-        try{ZstdImage zImp = mapper.readValue(f0, ZstdImage.class);
-            zImp.restore().show();
-        }
-        catch (IOException e) { e.printStackTrace();}
+    void testIO(ZstdImage zImp, String filePath) {
+        IJ.log("Size:"+zImp.zData.length);
+        ZImpIO zImpIO = new ZImpIO();
+        zImpIO.write(zImp, filePath);
+        ZstdImage readZImp = zImpIO.read(filePath);
+        ImagePlus restoredImp = readZImp.restore();
+        restoredImp.show();
     }
 
 }
