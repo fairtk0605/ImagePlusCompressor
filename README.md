@@ -1,97 +1,107 @@
-# ImageJ Zstandard Image Compression Plugin
+# ZstdImage - ImageJ High-Efficiency Image Stack Compressor
 
-ImageJ/Fiji上で動作する、Zstandard (Zstd) と MessagePack を用いた高効率な8bitモノクロ画像（またはスタック動画）の圧縮・保存用プラグインライブラリです。
+ZstdImage は、**ImageJ** の画像スタック（動画やタイムラプスデータ）を、**Zstd (Zstandard)** および各種画像処理アルゴリズムを用いて超高効率に圧縮・保存するためのJavaライブラリおよびプラグインです。 
 
-## 特徴
+特に ZBGImage クラスによる**背景差分抽出＋輝度補正（Illumination Correction）**を用いた動画圧縮は、固定視点で撮影された顕微鏡画像や監視カメラなどのタイムラプスデータに対して圧倒的な圧縮率を発揮します。 
 
-- **ZstdImage**: ImageJのImagePlus（スタック）をZstandardで可逆圧縮。
-- **ZQImage**: 指定した階調数（Colors）に量子化した上でZstd圧縮をかける非可逆圧縮。
-- **ZQBGImage**: 動画スタックから時間方向の基準背景を合成（メディアン等）し、フレームごとのコントラスト補正（ゲイン・オフセット）を計算した上で、背景差分データのみを圧縮保持する超高効率圧縮。
-- **MessagePackシリアライズ**: Jacksonデータバインディング経由で `.zimp` 拡張子のコンパクトなバイナリファイルとして保存・復元が可能。
+### 🌟 主な特徴
 
-## 必要要件
+* **多彩な圧縮戦略 (CompressionStrategy):** 
 
-- Java 8 以上
-- ImageJ / Fiji
-- 依存ライブラリ（詳細は下記参照）
+  * NoLossStrategy: 画質劣化のない可逆圧縮（RawピクセルをそのままZstd圧縮）。
+  * QuantizationStrategy: 色数（階調）を指定レベルに減色してデータ量を削減。
+  * JpegStrategy: 各フレームを低容量なJPEG形式に変換した上でさらに圧縮。
+* **革新的な背景差分シークエンス圧縮 (ZBGImage):** 
 
-## 依存関係 (Dependencies)
+  * スタック全体の中央値（Median）から「基準背景」を自動生成。
+  * フレームごとの輝度変化をアフィン変換係数（a ⋅ x + b）で自動補正。
+  * 背景との微小なノイズ差分をゼロクリアし、残った有意な差分情報と背景情報のみをパックしてZstdで極限まで圧縮。
+* **高速なシリアライズ:** 
 
-本プロジェクトをビルド、または動作させるには以下のライブラリが必要です。
+  * 圧縮データおよびメタデータ（解像度・圧縮戦略）を **MessagePack (Jackson)** 形式でバイナリ保存。
 
-### Maven を利用する場合 (`pom.xml`)
+### 🛠️ プロジェクト構成
 
-`pom.xml` の `<dependencies>` 構成に以下を追加してください。
+ソースコードは以下のコンポーネントで構成されています。 
 
-```xml
-<dependencies>
-    <!-- ImageJ API -->
-    <dependency>
-        <groupId>net.imagej</groupId>
-        <artifactId>ij</artifactId>
-        <version>1.54g</version> <!-- 任意のバージョン -->
-        <scope>provided</scope>
-    </dependency>
+クラス / インターフェース 
 
-    <!-- Zstandard Java bindings -->
-    <dependency>
-        <groupId>com.github.luben</groupId>
-        <artifactId>zstd-jni</artifactId>
-        <version>1.5.7-8</version>
-    </dependency>
+役割 
 
-    <!-- Jackson Databind -->
-    <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-        <version>2.17.2</version> <!-- 任意のバージョン -->
-    </dependency>
+**CompressionStrategy**
+圧縮アルゴリズムのインターフェース。Jacksonによるポリモーフィズムに対応。
+**ZstdImage**
+基礎となる画像スタック圧縮クラス。各フレームを個別圧縮してZstdでラップ。
+**ZBGImage**
+ZstdImage を拡張し、背景差分と輝度補正アルゴリズムを実装した超高圧縮モデル。
+**ZImpIO**
+MessagePackを利用して、圧縮オブジェクトをファイルへ高速に入出力するIOクラス。
+**ZImpSample**
+実際にImageJ上で動作させて、各種戦略での圧縮・保存・復元をテストするサンプルプラグイン。
 
-    <!-- Jackson Dataformat MessagePack -->
-    <dependency>
-        <groupId>org.msgpack</groupId>
-        <artifactId>jackson-dataformat-msgpack</artifactId>
-        <version>0.9.12</version>
-    </dependency>
-</dependencies>
-```
+### 🚀 使い方 (Usage)
 
-### Fiji / ImageJ に手動導入する場合
+### 1. 基本的な圧縮と保存
 
-ビルドしたJARファイルと同時に、以下の依存JARファイルを ImageJ の `plugins` もしくは `jars` フォルダに配置する必要があります。
+ImageJの ImagePlus オブジェクトを、任意の戦略で圧縮してファイルに保存します。 
 
-1. [zstd-jni](https://mvnrepository.com/artifact/com.github.luben/zstd-jni)
-2. [jackson-databind](https://mvnrepository.com) / `jackson-core` / `jackson-annotations`
-3. [jackson-dataformat-msgpack](https://mvnrepository.com/artifact/org.msgpack/jackson-dataformat-msgpack)
+java
 
-## 使い方 (サンプルコード)
+ImagePlus imp = IJ.getImage();
 
-プラグインとして実行する場合の最小構成コード（`ZImpSample.java`）の処理フローです。ImageJで画像を開いた状態で実行します。
+// 例: 64階調に量子化する戦略で圧縮
+CompressionStrategy strategy = new QuantizationStrategy(64);
+ZstdImage zImp = new ZstdImage(imp, strategy);
 
-```java
-import ij.IJ;
-import ij.ImagePlus;
-import ij.plugin.PlugIn;
+// ファイルへ保存 (MessagePack形式)
+ZImpIO io = new ZImpIO();
+io.write(zImp, "path/to/output.zimp");
 
-public class ZImpSample implements PlugIn {    
-    public void run(String arg) {
-        // 1. 開いている画像を取得
-        ImagePlus imp = IJ.getImage();
+コードは注意してご使用ください。
 
-        // 2. 各種圧縮インスタンスの生成
-        ZstdImage zImp0 = new ZstdImage(imp);       // 標準Zstd圧縮
-        ZQImage   zImp1 = new ZQImage(imp, 64);     // 64階調量子化 + Zstd
-        ZQBGImage zImp2 = new ZQBGImage(imp);       // 背景差分アルゴリズム圧縮
+### 2. 背景差分を用いた高効率圧縮 (ZBGImage)
 
-        // 3. ファイル保存・読み込み・復元・表示のテスト
-        saveAndreadAndShowZimp("F0", zImp0);
-        saveAndreadAndShowZimp("F1", zImp1);
-        saveAndreadAndShowZimp("F2", zImp2);
-    }
-    // ... (詳細はソースコードを参照)
-}
-```
+タイムラプス画像など、背景が固定されている動画に最適な圧縮方法です。 
 
-## ライセンス
+java
 
-[MIT License](LICENSE) (※利用するライセンスに合わせて変更してください)
+ImagePlus imp = IJ.getImage();
+
+// 可逆（NoLoss）の背景差分圧縮オブジェクトを生成
+ZBGImage zBgImp = new ZBGImage(imp, new NoLossStrategy());
+
+// 保存
+ZImpIO io = new ZImpIO();
+io.write(zBgImp, "path/to/video_compressed.zimp");
+
+コードは注意してご使用ください。
+
+### 3. データの読み込みと復元 (解凍)
+
+保存された .zimp ファイルからオブジェクトを復元し、ImageJで再表示します。 
+
+java
+
+ZImpIO io = new ZImpIO();
+
+// ファイルからデシリアライズ（自動で適切なStrategyが適用されます）
+ZstdImage readZImp = io.read("path/to/output.zimp");
+
+// ImageJのImagePlus形式にデコンプレスして表示
+ImagePlus restoredImp = readZImp.restore();
+restoredImp.show();
+
+コードは注意してご使用ください。
+
+### 📦 必要依存ライブラリ (Dependencies)
+
+本プロジェクトの実行には、以下のライブラリ（jar）がクラスパスに通っている必要があります。 
+
+* **ImageJ (ij.jar)**
+* **zstd-jni** (com.github.luben:zstd-jni)
+* **Jackson Databind** (com.fasterxml.jackson.core:jackson-databind)
+* **Jackson Dataformat MessagePack** (org.msgpack:jackson-dataformat-msgpack)
+
+### 📝 ライセンス (License)
+
+[MIT License](LICENSE) (またはご自身の選んだライセンスを記載してください)
